@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Float, DateTime, ForeignKey
 from app.db import Base
+from datetime import datetime
 
 class Payment(Base):
     __tablename__ = "payment"
@@ -10,3 +11,4 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     status = Column(String(50), nullable=False)
     paid_at = Column(DateTime) 
+    created_at = Column(DateTime, default=datetime.utcnow)

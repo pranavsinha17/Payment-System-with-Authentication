@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
 from app.db import Base
+from datetime import datetime
 
 class UserSubscription(Base):
     __tablename__ = "user_subscription"
@@ -8,4 +9,5 @@ class UserSubscription(Base):
     plan_id = Column(String(36), ForeignKey("subscription_plan.id"), nullable=False)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
-    is_active = Column(Boolean, default=True) 
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow) 
