@@ -8,12 +8,14 @@ from app.models.user_subscription import UserSubscription
 from app.models.payment import Payment
 from app.schemas import (
     UserCreate, UserOut, Token, SubscriptionPlanCreate, SubscriptionPlanOut,
-    UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut
+    UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
+    PlanChangeResponse
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from sqlalchemy import and_
+from typing import Optional
 
 # User router
 user_router = APIRouter()
@@ -175,4 +177,98 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
     
     db.commit()
     db.refresh(new_payment)
-    return new_payment 
+    return new_payment
+
+@subscription_router.post("/{subscription_id}/change-plan", response_model=PlanChangeResponse)
+def change_subscription_plan(
+    subscription_id: str,
+    new_plan_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    print(f"Current User ID: {current_user.id}")
+    print(f"Requested Subscription ID: {subscription_id}")
+    print(f"New Plan ID: {new_plan_id}")
+    
+    # Get current subscription
+    current_subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.id == subscription_id,
+            UserSubscription.user_id == current_user.id
+        )
+    ).first()
+    
+    if not current_subscription:
+        print(f"No subscription found with ID: {subscription_id} for user: {current_user.id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found or does not belong to the user"
+        )
+    
+    print(f"Found subscription: {current_subscription.id}")
+    print(f"Current plan ID: {current_subscription.plan_id}")
+    
+    # Get new plan
+    new_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == new_plan_id).first()
+    if not new_plan:
+        print(f"No plan found with ID: {new_plan_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="New plan not found"
+        )
+    
+    print(f"Found new plan: {new_plan.id}")
+    
+    # Get current plan
+    current_plan = db.query(SubscriptionPlan).filter(
+        SubscriptionPlan.id == current_subscription.plan_id
+    ).first()
+    
+    # Calculate remaining days in current subscription
+    remaining_days = (current_subscription.end_date - datetime.utcnow()).days
+    if remaining_days < 0:
+        remaining_days = 0
+    
+    print(f"Remaining days: {remaining_days}")
+    
+    # Calculate prorated amount
+    daily_rate_current = current_plan.price / 30  # Assuming monthly plans
+    daily_rate_new = new_plan.price / 30
+    remaining_value = daily_rate_current * remaining_days
+    new_value = daily_rate_new * remaining_days
+    price_difference = new_value - remaining_value
+    
+    print(f"Price difference: {price_difference}")
+    
+    # Create new subscription
+    new_subscription = UserSubscription(
+        id=str(uuid4()),
+        user_id=current_user.id,
+        plan_id=new_plan_id,
+        start_date=datetime.utcnow(),
+        end_date=datetime.utcnow() + timedelta(days=remaining_days),
+        is_active=False  # Will be activated after payment
+    )
+    
+    # Deactivate current subscription
+    current_subscription.is_active = False
+    
+    db.add(new_subscription)
+    db.commit()
+    db.refresh(new_subscription)
+    
+    print(f"Created new subscription: {new_subscription.id}")
+    
+    return PlanChangeResponse(
+        subscription=new_subscription,
+        price_difference=price_difference,
+        remaining_days=remaining_days
+    )
+
+@subscription_router.get("/subscription-plans", response_model=list[SubscriptionPlanOut])
+def list_subscription_plans(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all available subscription plans"""
+    return db.query(SubscriptionPlan).all() 

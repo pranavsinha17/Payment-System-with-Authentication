@@ -70,4 +70,12 @@ class PaymentOut(PaymentBase):
     created_at: datetime
 
     class Config:
+        from_attributes = True
+
+class PlanChangeResponse(BaseModel):
+    subscription: UserSubscriptionOut
+    price_difference: float
+    remaining_days: int
+
+    class Config:
         from_attributes = True 
