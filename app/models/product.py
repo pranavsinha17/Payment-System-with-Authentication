@@ -3,9 +3,9 @@ from app.db import Base
 
 class Product(Base):
     __tablename__ = "product"
-    id = Column(String, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    description = Column(String)
-    type = Column(String)
-    script_ref = Column(String)
-    output_type = Column(String) 
+    id = Column(String(36), primary_key=True, index=True)  # UUID is 36 chars
+    name = Column(String(100), nullable=False)
+    description = Column(String(500))
+    type = Column(String(50))
+    script_ref = Column(String(255))
+    output_type = Column(String(50)) 

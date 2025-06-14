@@ -3,10 +3,10 @@ from app.db import Base
 
 class Payment(Base):
     __tablename__ = "payment"
-    id = Column(String, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("user.id"), nullable=False)
-    subscription_id = Column(String, ForeignKey("user_subscription.id"), nullable=False)
-    razorpay_payment_id = Column(String)
+    id = Column(String(36), primary_key=True, index=True)  # UUID is 36 chars
+    user_id = Column(String(36), ForeignKey("user.id"), nullable=False)
+    subscription_id = Column(String(36), ForeignKey("user_subscription.id"), nullable=False)
+    razorpay_payment_id = Column(String(100))
     amount = Column(Float, nullable=False)
-    status = Column(String, nullable=False)
+    status = Column(String(50), nullable=False)
     paid_at = Column(DateTime) 

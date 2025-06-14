@@ -9,3 +9,4 @@ razorpay
 python-multipart
 pandas
 openpyxl 
+pymysql
