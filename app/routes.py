@@ -6,16 +6,18 @@ from app.models.user import User
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.user_subscription import UserSubscription
 from app.models.payment import Payment
+from app.models.product_selection import ProductSelection
 from app.schemas import (
     UserCreate, UserOut, Token, SubscriptionPlanCreate, SubscriptionPlanOut,
     UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
-    PlanChangeResponse
+    PlanChangeResponse, ProductSelectionBulkCreate, ProductSelectionBulkResponse,
+    ProductSelectionOut
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from sqlalchemy import and_
-from typing import Optional
+from typing import Optional, List
 
 # User router
 user_router = APIRouter()
@@ -271,4 +273,110 @@ def list_subscription_plans(
     db: Session = Depends(get_db)
 ):
     """Get all available subscription plans"""
-    return db.query(SubscriptionPlan).all() 
+    return db.query(SubscriptionPlan).all()
+
+@subscription_router.post("/product-selections", response_model=ProductSelectionBulkResponse)
+def create_product_selections(
+    bulk_selection: ProductSelectionBulkCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify subscription exists and belongs to user
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.id == bulk_selection.subscription_id,
+            UserSubscription.user_id == current_user.id
+        )
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found or does not belong to the user"
+        )
+    
+    # Get subscription plan
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    
+    # Calculate total price based on number of products and plan duration
+    base_price = plan.price  # This is the price for one product
+    total_price = base_price * len(bulk_selection.product_ids)
+    
+    # Create product selections
+    selections = []
+    for product_id in bulk_selection.product_ids:
+        new_selection = ProductSelection(
+            id=str(uuid4()),
+            user_id=current_user.id,
+            subscription_id=subscription.id,
+            product_id=product_id,
+            is_active=True
+        )
+        db.add(new_selection)
+        selections.append(new_selection)
+    
+    db.commit()
+    
+    # Refresh all selections to get their IDs
+    for selection in selections:
+        db.refresh(selection)
+    
+    return ProductSelectionBulkResponse(
+        selections=selections,
+        total_price=total_price,
+        duration=plan.duration,
+        number_of_products=len(bulk_selection.product_ids)
+    )
+
+@subscription_router.get("/subscriptions/{subscription_id}/product-selections", response_model=List[ProductSelectionOut])
+def get_product_selections(
+    subscription_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify subscription exists and belongs to user
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.id == subscription_id,
+            UserSubscription.user_id == current_user.id
+        )
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found or does not belong to the user"
+        )
+    
+    # Get all product selections for this subscription
+    selections = db.query(ProductSelection).filter(
+        ProductSelection.subscription_id == subscription_id
+    ).all()
+    
+    return selections
+
+@subscription_router.delete("/product-selections/{selection_id}")
+def delete_product_selection(
+    selection_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify selection exists and belongs to user
+    selection = db.query(ProductSelection).filter(
+        and_(
+            ProductSelection.id == selection_id,
+            ProductSelection.user_id == current_user.id
+        )
+    ).first()
+    
+    if not selection:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product selection not found or does not belong to the user"
+        )
+    
+    # Soft delete by setting is_active to False
+    selection.is_active = False
+    db.commit()
+    
+    return {"message": "Product selection deactivated successfully"} 

@@ -78,4 +78,30 @@ class PlanChangeResponse(BaseModel):
     remaining_days: int
 
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+class ProductSelectionBase(BaseModel):
+    product_id: str
+
+class ProductSelectionCreate(ProductSelectionBase):
+    subscription_id: str
+
+class ProductSelectionOut(ProductSelectionBase):
+    id: str
+    user_id: str
+    subscription_id: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class ProductSelectionBulkCreate(BaseModel):
+    product_ids: List[str]
+    subscription_id: str
+
+class ProductSelectionBulkResponse(BaseModel):
+    selections: List[ProductSelectionOut]
+    total_price: float
+    duration: str  # monthly, quarterly, yearly
+    number_of_products: int 

@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, Boolean, DateTime
+from sqlalchemy.orm import relationship
 from app.db import Base
 
 class User(Base):
@@ -8,4 +9,8 @@ class User(Base):
     phone = Column(String(20), unique=True, index=True)  # Adjust length as needed
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
-    registered_at = Column(DateTime) 
+    registered_at = Column(DateTime)
+
+    # Relationships
+    subscriptions = relationship("UserSubscription", back_populates="user")
+    product_selections = relationship("ProductSelection", back_populates="user") 
