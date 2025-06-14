@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from datetime import datetime
+from pydantic import validator
 
 class UserBase(BaseModel):
     email: EmailStr
@@ -30,9 +31,22 @@ class SubscriptionPlanBase(BaseModel):
 class SubscriptionPlanCreate(SubscriptionPlanBase):
     pass
 
-class SubscriptionPlanOut(SubscriptionPlanBase):
+class SubscriptionPlanOut(BaseModel):
     id: str
+    name: str
+    price: float
+    duration: str
+    product_ids: list[str]
     created_at: datetime
+
+    @validator('product_ids', pre=True)
+    def parse_product_ids(cls, v):
+        if isinstance(v, str):
+            # Remove brackets and quotes, then split by comma
+            v = v.strip('[]').replace('"', '').replace("'", "").split(',')
+            # Remove any empty strings
+            v = [x.strip() for x in v if x.strip()]
+        return v
 
     class Config:
         from_attributes = True
@@ -104,4 +118,49 @@ class ProductSelectionBulkResponse(BaseModel):
     selections: List[ProductSelectionOut]
     total_price: float
     duration: str  # monthly, quarterly, yearly
-    number_of_products: int 
+    number_of_products: int
+
+class ProductCreate(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    type: str | None = None
+    script_ref: str | None = None
+    output_type: str | None = None
+
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    description: str | None
+    type: str | None
+    script_ref: str | None
+    output_type: str | None
+
+    class Config:
+        from_attributes = True
+
+class DetailedProductSelection(BaseModel):
+    id: str
+    product_id: str
+    is_active: bool
+    created_at: datetime
+    product: ProductOut
+
+    class Config:
+        from_attributes = True
+
+class DetailedSubscriptionResponse(BaseModel):
+    id: str
+    user_id: str
+    plan_id: str
+    start_date: datetime
+    end_date: datetime
+    is_active: bool
+    created_at: datetime
+    plan: SubscriptionPlanOut
+    product_selections: list[DetailedProductSelection]
+    total_price: float
+    number_of_products: int
+
+    class Config:
+        from_attributes = True 

@@ -6,18 +6,20 @@ from app.models.user import User
 from app.models.subscription_plan import SubscriptionPlan
 from app.models.user_subscription import UserSubscription
 from app.models.payment import Payment
+from app.models.product import Product
 from app.models.product_selection import ProductSelection
 from app.schemas import (
     UserCreate, UserOut, Token, SubscriptionPlanCreate, SubscriptionPlanOut,
     UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
     PlanChangeResponse, ProductSelectionBulkCreate, ProductSelectionBulkResponse,
-    ProductSelectionOut
+    ProductSelectionOut, DetailedSubscriptionResponse, ProductCreate, ProductOut
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from sqlalchemy import and_
 from typing import Optional, List
+import json
 
 # User router
 user_router = APIRouter()
@@ -106,7 +108,7 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
     db.refresh(new_subscription)
     return new_subscription
 
-@subscription_router.get("/me/active-subscription", response_model=UserSubscriptionOut)
+@subscription_router.get("/me/active-subscription", response_model=DetailedSubscriptionResponse)
 def get_active_subscription(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Get the user's active subscription
     subscription = db.query(UserSubscription).filter(
@@ -123,16 +125,99 @@ def get_active_subscription(current_user: User = Depends(get_current_user), db: 
             detail="No active subscription found"
         )
     
-    return subscription
+    # Get the subscription plan
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    
+    # Get all active product selections for this subscription
+    product_selections = db.query(ProductSelection).filter(
+        and_(
+            ProductSelection.subscription_id == subscription.id,
+            ProductSelection.is_active == True
+        )
+    ).all()
+    
+    # Calculate total price
+    total_price = plan.price * len(product_selections)
+    
+    # Create response dictionary
+    response = {
+        "id": subscription.id,
+        "user_id": subscription.user_id,
+        "plan_id": subscription.plan_id,
+        "start_date": subscription.start_date,
+        "end_date": subscription.end_date,
+        "is_active": subscription.is_active,
+        "created_at": subscription.created_at,
+        "plan": plan,
+        "product_selections": product_selections,
+        "total_price": total_price,
+        "number_of_products": len(product_selections)
+    }
+    
+    return response
 
-@subscription_router.get("/me/subscriptions", response_model=list[UserSubscriptionOut])
-def get_subscription_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # Get all subscriptions for the current user, ordered by creation date
+@subscription_router.get("/me/subscriptions", response_model=list[DetailedSubscriptionResponse])
+def get_user_subscriptions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get all subscriptions for the user
     subscriptions = db.query(UserSubscription).filter(
         UserSubscription.user_id == current_user.id
-    ).order_by(UserSubscription.created_at.desc()).all()
+    ).all()
     
-    return subscriptions
+    detailed_subscriptions = []
+    for subscription in subscriptions:
+        # Get the subscription plan
+        plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+        
+        # First get the product selections without joining
+        selections = db.query(ProductSelection).filter(
+            and_(
+                ProductSelection.subscription_id == subscription.id,
+                ProductSelection.is_active == True,
+                ProductSelection.user_id == current_user.id
+            )
+        ).all()
+        
+        # Then get the products for these selections
+        product_selections = []
+        for selection in selections:
+            product = db.query(Product).filter(Product.id == selection.product_id).first()
+            if product:
+                product_selections.append({
+                    "id": selection.id,
+                    "product_id": selection.product_id,
+                    "is_active": selection.is_active,
+                    "created_at": selection.created_at,
+                    "product": {
+                        "id": product.id,
+                        "name": product.name,
+                        "description": product.description,
+                        "type": product.type,
+                        "script_ref": product.script_ref,
+                        "output_type": product.output_type
+                    }
+                })
+        
+        # Calculate total price based on number of selected products
+        # If no products are selected, use the base plan price
+        total_price = plan.price if not product_selections else plan.price * len(product_selections)
+        
+        # Create detailed subscription response
+        detailed_subscription = {
+            "id": subscription.id,
+            "user_id": subscription.user_id,
+            "plan_id": subscription.plan_id,
+            "start_date": subscription.start_date,
+            "end_date": subscription.end_date,
+            "is_active": subscription.is_active,
+            "created_at": subscription.created_at,
+            "plan": plan,
+            "product_selections": product_selections,
+            "total_price": total_price,
+            "number_of_products": len(product_selections)
+        }
+        detailed_subscriptions.append(detailed_subscription)
+    
+    return detailed_subscriptions
 
 @subscription_router.post("/payments", response_model=PaymentOut)
 def create_payment(payment: PaymentCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -290,43 +375,54 @@ def create_product_selections(
     ).first()
     
     if not subscription:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    
+    # Get the subscription plan
+    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Subscription plan not found")
+    
+    # Verify all product IDs exist in the plan's product_ids
+    plan_product_ids = json.loads(plan.product_ids) if isinstance(plan.product_ids, str) else plan.product_ids
+    invalid_products = [pid for pid in bulk_selection.product_ids if pid not in plan_product_ids]
+    if invalid_products:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found or does not belong to the user"
+            status_code=400,
+            detail=f"Products {invalid_products} are not available in this plan"
         )
     
-    # Get subscription plan
-    plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+    # Deactivate any existing product selections for this subscription
+    db.query(ProductSelection).filter(
+        ProductSelection.subscription_id == subscription.id
+    ).update({"is_active": False})
     
-    # Calculate total price based on number of products and plan duration
-    base_price = plan.price  # This is the price for one product
-    total_price = base_price * len(bulk_selection.product_ids)
-    
-    # Create product selections
+    # Create new product selections
     selections = []
     for product_id in bulk_selection.product_ids:
-        new_selection = ProductSelection(
-            id=str(uuid4()),
+        selection = ProductSelection(
             user_id=current_user.id,
             subscription_id=subscription.id,
             product_id=product_id,
             is_active=True
         )
-        db.add(new_selection)
-        selections.append(new_selection)
+        db.add(selection)
+        selections.append(selection)
     
     db.commit()
     
-    # Refresh all selections to get their IDs
+    # Refresh selections to get their IDs
     for selection in selections:
         db.refresh(selection)
     
-    return ProductSelectionBulkResponse(
-        selections=selections,
-        total_price=total_price,
-        duration=plan.duration,
-        number_of_products=len(bulk_selection.product_ids)
-    )
+    # Calculate total price based on number of products
+    total_price = plan.price * len(bulk_selection.product_ids)
+    
+    return {
+        "selections": selections,
+        "total_price": total_price,
+        "duration": plan.duration,
+        "number_of_products": len(bulk_selection.product_ids)
+    }
 
 @subscription_router.get("/subscriptions/{subscription_id}/product-selections", response_model=List[ProductSelectionOut])
 def get_product_selections(
@@ -379,4 +475,24 @@ def delete_product_selection(
     selection.is_active = False
     db.commit()
     
-    return {"message": "Product selection deactivated successfully"} 
+    return {"message": "Product selection deactivated successfully"}
+
+@subscription_router.post("/products", response_model=ProductOut)
+def create_product(
+    product: ProductCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Create new product
+    new_product = Product(
+        id=product.id,
+        name=product.name,
+        description=product.description,
+        type=product.type,
+        script_ref=product.script_ref,
+        output_type=product.output_type
+    )
+    db.add(new_product)
+    db.commit()
+    db.refresh(new_product)
+    return new_product 
