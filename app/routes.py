@@ -13,8 +13,10 @@ from app.schemas import (
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
+from sqlalchemy import and_
 
-router = APIRouter()
+# User router
+user_router = APIRouter()
 
 def get_db():
     db = SessionLocal()
@@ -23,7 +25,7 @@ def get_db():
     finally:
         db.close()
 
-@router.post("/register", response_model=UserOut)
+@user_router.post("/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
@@ -42,7 +44,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.refresh(new_user)
     return new_user
 
-@router.post("/login", response_model=Token)
+@user_router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
@@ -50,23 +52,26 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = create_access_token(data={"sub": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.get("/me", response_model=UserOut)
+@user_router.get("/me", response_model=UserOut)
 def read_users_me(current_user: User = Depends(get_current_user)):
     return current_user
 
-@router.get("/users", response_model=list[UserOut])
+@user_router.get("/users", response_model=list[UserOut])
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # In a real app, check if current_user is admin
     return db.query(User).all()
 
-@router.put("/me/phone", response_model=UserOut)
+@user_router.put("/me/phone", response_model=UserOut)
 def update_phone(new_phone: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     current_user.phone = new_phone
     db.commit()
     db.refresh(current_user)
     return current_user
 
-@router.post("/subscription-plans", response_model=SubscriptionPlanOut)
+# Subscription router
+subscription_router = APIRouter()
+
+@subscription_router.post("/subscription-plans", response_model=SubscriptionPlanOut)
 def create_subscription_plan(plan: SubscriptionPlanCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # In a real app, check if current_user is admin
     new_plan = SubscriptionPlan(
@@ -81,7 +86,7 @@ def create_subscription_plan(plan: SubscriptionPlanCreate, current_user: User = 
     db.refresh(new_plan)
     return new_plan
 
-@router.post("/user-subscriptions", response_model=UserSubscriptionOut)
+@subscription_router.post("/user-subscriptions", response_model=UserSubscriptionOut)
 def create_user_subscription(subscription: UserSubscriptionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # In a real app, check if plan_id is valid and if user is eligible
     new_subscription = UserSubscription(
@@ -90,15 +95,57 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
         plan_id=subscription.plan_id,
         start_date=subscription.start_date,
         end_date=subscription.end_date,
-        is_active=subscription.is_active,
+        is_active=subscription.is_active
     )
     db.add(new_subscription)
     db.commit()
     db.refresh(new_subscription)
     return new_subscription
 
-@router.post("/payments", response_model=PaymentOut)
+@subscription_router.get("/me/active-subscription", response_model=UserSubscriptionOut)
+def get_active_subscription(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get the user's active subscription
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.user_id == current_user.id,
+            UserSubscription.is_active == True,
+            UserSubscription.end_date > datetime.utcnow()
+        )
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active subscription found"
+        )
+    
+    return subscription
+
+@subscription_router.get("/me/subscriptions", response_model=list[UserSubscriptionOut])
+def get_subscription_history(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Get all subscriptions for the current user, ordered by creation date
+    subscriptions = db.query(UserSubscription).filter(
+        UserSubscription.user_id == current_user.id
+    ).order_by(UserSubscription.created_at.desc()).all()
+    
+    return subscriptions
+
+@subscription_router.post("/payments", response_model=PaymentOut)
 def create_payment(payment: PaymentCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Verify that the subscription exists and belongs to the user
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.id == payment.subscription_id,
+            UserSubscription.user_id == current_user.id
+        )
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found or does not belong to the user"
+        )
+    
     # In a real app, verify the payment with Razorpay
     new_payment = Payment(
         id=str(uuid4()),
@@ -110,6 +157,22 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
         paid_at=payment.paid_at
     )
     db.add(new_payment)
+    
+    # Activate subscription only if payment is successful
+    if payment.status.lower() == "completed":
+        subscription.is_active = True
+        # Update start_date to current time if it's a new subscription
+        if subscription.start_date > datetime.utcnow():
+            subscription.start_date = datetime.utcnow()
+            # Recalculate end_date based on plan duration
+            plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
+            if plan.duration == "monthly":
+                subscription.end_date = subscription.start_date + timedelta(days=30)
+            elif plan.duration == "quarterly":
+                subscription.end_date = subscription.start_date + timedelta(days=90)
+            elif plan.duration == "yearly":
+                subscription.end_date = subscription.start_date + timedelta(days=365)
+    
     db.commit()
     db.refresh(new_payment)
     return new_payment 

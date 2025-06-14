@@ -9,5 +9,5 @@ class UserSubscription(Base):
     plan_id = Column(String(36), ForeignKey("subscription_plan.id"), nullable=False)
     start_date = Column(DateTime, nullable=False)
     end_date = Column(DateTime, nullable=False)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow) 
