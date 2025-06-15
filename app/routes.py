@@ -78,14 +78,17 @@ def update_phone(new_phone: str, current_user: User = Depends(get_current_user),
 subscription_router = APIRouter()
 
 @subscription_router.post("/subscription-plans", response_model=SubscriptionPlanOut)
-def create_subscription_plan(plan: SubscriptionPlanCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # In a real app, check if current_user is admin
+def create_subscription_plan(
+    plan: SubscriptionPlanCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Create new subscription plan
     new_plan = SubscriptionPlan(
-        id=str(uuid4()),
         name=plan.name,
         price=plan.price,
         duration=plan.duration,
-        product_ids=plan.product_ids
+        product_ids=plan.product_ids  # This will be converted to JSON string in the model
     )
     db.add(new_plan)
     db.commit()
@@ -128,16 +131,37 @@ def get_active_subscription(current_user: User = Depends(get_current_user), db: 
     # Get the subscription plan
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
     
-    # Get all active product selections for this subscription
-    product_selections = db.query(ProductSelection).filter(
+    # Get all active product selections for this subscription with product details
+    selections = db.query(ProductSelection).filter(
         and_(
             ProductSelection.subscription_id == subscription.id,
-            ProductSelection.is_active == True
+            ProductSelection.is_active == True,
+            ProductSelection.user_id == current_user.id
         )
     ).all()
     
-    # Calculate total price
-    total_price = plan.price * len(product_selections)
+    # Get product details for each selection
+    product_selections = []
+    for selection in selections:
+        product = db.query(Product).filter(Product.id == selection.product_id).first()
+        if product:
+            product_selections.append({
+                "id": selection.id,
+                "product_id": selection.product_id,
+                "is_active": selection.is_active,
+                "created_at": selection.created_at,
+                "product": {
+                    "id": product.id,
+                    "name": product.name,
+                    "description": product.description,
+                    "type": product.type,
+                    "script_ref": product.script_ref,
+                    "output_type": product.output_type
+                }
+            })
+    
+    # Calculate total price based on number of selected products
+    total_price = plan.price if not product_selections else plan.price * len(product_selections)
     
     # Create response dictionary
     response = {
