@@ -10,6 +10,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
     registered_at = Column(DateTime)
+    has_used_trial = Column(Boolean, default=False)  # Track if user has used their free trial
 
     # Relationships
     subscriptions = relationship("UserSubscription", back_populates="user")

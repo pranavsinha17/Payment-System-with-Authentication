@@ -102,21 +102,88 @@ def create_subscription_plan(
     db.refresh(new_plan)
     return new_plan
 
+@subscription_router.post("/trial-plan", response_model=SubscriptionPlanOut)
+def create_trial_plan(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Get all available products
+    all_products = db.query(Product).all()
+    product_ids = [product.id for product in all_products]
+    
+    # Create trial plan with all products
+    trial_plan = SubscriptionPlan(
+        name="30-Day Free Trial",
+        price=0.0,  # Free trial
+        duration="monthly",
+        product_ids=product_ids
+    )
+    db.add(trial_plan)
+    db.commit()
+    db.refresh(trial_plan)
+    return trial_plan
+
 @subscription_router.post("/user-subscriptions", response_model=UserSubscriptionOut)
 def create_user_subscription(subscription: UserSubscriptionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # In a real app, check if plan_id is valid and if user is eligible
-    new_subscription = UserSubscription(
-        id=str(uuid4()),
-        user_id=current_user.id,
-        plan_id=subscription.plan_id,
-        start_date=subscription.start_date,
-        end_date=subscription.end_date,
-        is_active=subscription.is_active
-    )
-    db.add(new_subscription)
-    db.commit()
-    db.refresh(new_subscription)
-    return new_subscription
+    # Check if user already has an active subscription
+    existing_subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.user_id == current_user.id,
+            UserSubscription.is_active == True,
+            UserSubscription.end_date > datetime.utcnow()
+        )
+    ).first()
+    
+    if existing_subscription:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You already have an active subscription. Please wait until it expires or cancel it first."
+        )
+    
+    # Check if this is a first-time user who hasn't used their trial
+    if not current_user.has_used_trial:
+        # Find the trial plan
+        trial_plan = db.query(SubscriptionPlan).filter(
+            SubscriptionPlan.name == "30-Day Free Trial"
+        ).first()
+        
+        if not trial_plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trial plan not found. Please contact support."
+            )
+        
+        # Create a trial subscription
+        new_subscription = UserSubscription(
+            id=str(uuid4()),
+            user_id=current_user.id,
+            plan_id=trial_plan.id,  # Use trial plan ID
+            start_date=datetime.utcnow(),
+            end_date=datetime.utcnow() + timedelta(days=30),  # 30-day trial
+            is_active=True  # Activate trial immediately
+        )
+        
+        # Update user's has_used_trial field
+        db.query(User).filter(User.id == current_user.id).update({"has_used_trial": True})
+        
+        db.add(new_subscription)
+        db.commit()
+        db.refresh(new_subscription)
+        return new_subscription
+    else:
+        # Regular subscription creation
+        new_subscription = UserSubscription(
+            id=str(uuid4()),
+            user_id=current_user.id,
+            plan_id=subscription.plan_id,
+            start_date=subscription.start_date,
+            end_date=subscription.end_date,
+            is_active=subscription.is_active
+        )
+        db.add(new_subscription)
+        db.commit()
+        db.refresh(new_subscription)
+        return new_subscription
 
 @subscription_router.get("/me/active-subscription", response_model=DetailedSubscriptionResponse)
 def get_active_subscription(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
