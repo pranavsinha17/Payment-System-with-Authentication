@@ -33,9 +33,16 @@ def get_db():
 
 @user_router.post("/register", response_model=UserOut)
 def register(user: UserCreate, db: Session = Depends(get_db)):
+    # Check for duplicate email
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Check for duplicate phone
+    db_user_phone = db.query(User).filter(User.phone == user.phone).first()
+    if db_user_phone:
+        raise HTTPException(status_code=400, detail="Phone number already registered")
+    
     hashed_password = get_password_hash(user.password)
     new_user = User(
         id=str(uuid4()),
