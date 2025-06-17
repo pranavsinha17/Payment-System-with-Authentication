@@ -10,7 +10,7 @@ def send_email(subject: str, body: str, to_email: str):
         html_content=body
     )
     try:
-        sg = SendGridAPIClient("SENDGRID_API_KEY")
+        sg = SendGridAPIClient(os.environ.get("SENDGRID_API_KEY"))
         response = sg.send(message)
         print(f"Email sent to {to_email}, status code: {response.status_code}")
     except Exception as e:

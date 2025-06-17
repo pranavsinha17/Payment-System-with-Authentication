@@ -2,6 +2,37 @@
 
 A FastAPI-based payment system with user authentication, subscription management, and product selection capabilities.
 
+## Latest Features & Security Updates
+
+### 1. 30-Day Free Trial for First-Time Users
+- First-time users automatically receive a 30-day free trial with access to all products.
+- The system tracks trial usage and prevents multiple trials per user.
+
+### 2. Prevent Multiple Active Subscriptions
+- Users cannot create a new subscription if they already have an active one.
+- Attempting to do so returns a clear error message.
+
+### 3. Cookie-Based Authentication
+- JWT tokens are now set as HTTP-only cookies on login for secure frontend authentication.
+- The backend reads tokens from cookies or headers, supporting modern frontend best practices.
+- CORS is configured to allow credentials.
+
+### 4. Password Reset Flow (with Email)
+- Users can request a password reset link via `/users/forgot-password` (POST, JSON: `{ "email": "user@example.com" }`).
+- A secure reset link is emailed using SendGrid (configure your API key and sender email).
+- Users reset their password via `/users/reset-password` (POST, JSON: `{ "token": "...", "new_password": "..." }`).
+
+### 5. Token Invalidation After Password Reset
+- After a password reset, all previously issued tokens are invalidated.
+- This is achieved by tracking `last_password_change` in the database and JWT. If a token's value doesn't match the DB, access is denied and the user must log in again.
+- **Manual DB update required:**
+  ```sql
+  ALTER TABLE user
+  ADD COLUMN last_password_change DATETIME DEFAULT CURRENT_TIMESTAMP;
+  ```
+
+---
+
 ## Features
 
 - User Authentication (JWT-based)
