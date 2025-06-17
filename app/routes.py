@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from app.db import SessionLocal
@@ -23,6 +23,9 @@ import json
 import secrets
 from pydantic import BaseModel
 from app.utils.email_utils import send_email
+import pandas as pd
+from fastapi.responses import StreamingResponse
+import io
 
 # User router
 user_router = APIRouter()
@@ -646,4 +649,47 @@ def create_product(
     db.add(new_product)
     db.commit()
     db.refresh(new_product)
-    return new_product 
+    return new_product
+
+@subscription_router.post("/product1/process-file")
+def process_product1_file(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Check for active subscription (reuse your existing logic)
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.user_id == current_user.id,
+            UserSubscription.is_active == True,
+            UserSubscription.end_date > datetime.utcnow()
+        )
+    ).first()
+    if not subscription:
+        raise HTTPException(status_code=403, detail="Your subscription has expired. Please subscribe to continue.")
+
+    # Read the uploaded file into a DataFrame
+    if file.filename.endswith('.csv'):
+        df = pd.read_csv(file.file)
+    elif file.filename.endswith('.xls') or file.filename.endswith('.xlsx'):
+        df = pd.read_excel(file.file)
+    else:
+        raise HTTPException(status_code=400, detail="Only CSV and Excel files are supported.")
+
+    # --- Tweak the DataFrame here (example: add a column) ---
+    df['tweaked'] = 'example tweak'  # Replace with your actual logic
+    # -------------------------------------------------------
+
+    # Write the tweaked DataFrame to an Excel file in-memory
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False)
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={
+            'Content-Disposition': f'attachment; filename="tweaked_{file.filename.rsplit('.', 1)[0]}.xlsx"'
+        }
+    ) 
