@@ -8,5 +8,5 @@ passlib[bcrypt]
 razorpay
 python-multipart
 pandas
-openpyxl 
-pymysql
+openpyxl
+pyodbc

@@ -69,13 +69,25 @@ pip install -r requirements.txt
 4. Set up environment variables:
 Create a `.env` file in the root directory with the following variables:
 ```env
-DATABASE_URL=mysql+pymysql://user:password@localhost/dbname
+# Azure SQL Configuration
+AZURE_SQL_SERVER=your-server.database.windows.net
+AZURE_SQL_DATABASE=your-database
+AZURE_SQL_USERNAME=your-username
+AZURE_SQL_PASSWORD=your-password
+
+# Application Configuration
 SECRET_KEY=your-secret-key
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 ```
 
-5. Initialize the database:
+5. Install ODBC Driver:
+Before running the application, make sure to install the ODBC Driver for SQL Server:
+- Windows: Download and install from Microsoft's website
+- Linux: Follow Microsoft's instructions for your distribution
+- macOS: Use Homebrew: `brew tap microsoft/mssql-release && brew install msodbcsql18`
+
+6. Initialize the database:
 ```bash
 alembic upgrade head
 ```
