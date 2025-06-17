@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from app.db import SessionLocal
@@ -58,11 +58,18 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @user_router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), response: Response = None):
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Incorrect email or password")
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
     access_token = create_access_token(data={"sub": user.id})
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer {access_token}",
+        httponly=True,
+        samesite="lax",  # or "none" if using cross-site cookies with HTTPS
+        secure=True      # set to True in production with HTTPS
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 @user_router.get("/me", response_model=UserOut)
