@@ -20,6 +20,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_
 from typing import Optional, List
 import json
+import secrets
+from pydantic import BaseModel
+from app.utils.email_utils import send_email
 
 # User router
 user_router = APIRouter()
@@ -62,7 +65,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     user = db.query(User).filter(User.email == form_data.username).first()
     if not user or not verify_password(form_data.password, user.password_hash):
         raise HTTPException(status_code=400, detail="Incorrect email or password")
-    access_token = create_access_token(data={"sub": user.id})
+    access_token = create_access_token(data={
+        "sub": user.id,
+        "last_password_change": str(user.last_password_change) if user.last_password_change else ""
+    })
     response.set_cookie(
         key="access_token",
         value=f"Bearer {access_token}",
@@ -87,6 +93,46 @@ def update_phone(new_phone: str, current_user: User = Depends(get_current_user),
     db.commit()
     db.refresh(current_user)
     return current_user
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+@user_router.post("/forgot-password")
+def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User with this email does not exist.")
+    # Generate a secure token and expiry (1 hour)
+    token = secrets.token_urlsafe(32)
+    expiry = datetime.utcnow() + timedelta(hours=1)
+    user.password_reset_token = token
+    user.password_reset_token_expiry = expiry
+    db.commit()
+    # Send the reset link via email
+    reset_link = f"http://localhost:3000/reset-password?token={token}"
+    email_body = f"Click the link to reset your password: <a href='{reset_link}'>{reset_link}</a>"
+    send_email(
+        subject="Password Reset Request",
+        body=email_body,
+        to_email=user.email
+    )
+    return {"message": "If this email exists, a password reset link has been sent."}
+
+@user_router.post("/reset-password")
+def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.password_reset_token == request.token).first()
+    if not user or not user.password_reset_token_expiry or user.password_reset_token_expiry < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invalid or expired token.")
+    user.password_hash = get_password_hash(request.new_password)
+    user.password_reset_token = None
+    user.password_reset_token_expiry = None
+    user.last_password_change = datetime.utcnow()
+    db.commit()
+    return {"message": "Password has been reset successfully."}
 
 # Subscription router
 subscription_router = APIRouter()

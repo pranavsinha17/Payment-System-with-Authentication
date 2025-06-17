@@ -1,6 +1,7 @@
 from sqlalchemy import Column, String, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from app.db import Base
+from datetime import datetime
 
 class User(Base):
     __tablename__ = "user"
@@ -11,6 +12,9 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     registered_at = Column(DateTime)
     has_used_trial = Column(Boolean, default=False)  # Track if user has used their free trial
+    password_reset_token = Column(String(255), nullable=True)
+    password_reset_token_expiry = Column(DateTime, nullable=True)
+    last_password_change = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     subscriptions = relationship("UserSubscription", back_populates="user")

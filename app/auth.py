@@ -46,6 +46,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
+        token_last_password_change = payload.get("last_password_change")
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -54,4 +55,10 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
+    # Check last_password_change
+    if token_last_password_change != str(user.last_password_change):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token is no longer valid. Please log in again."
+        )
     return user 
