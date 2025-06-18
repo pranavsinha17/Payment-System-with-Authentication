@@ -15,3 +15,4 @@ pydantic[email]
 pydantic
 sendgrid
 setuptools
+pydantic-settings
