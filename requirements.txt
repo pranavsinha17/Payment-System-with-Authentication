@@ -13,3 +13,4 @@ pyodbc
 python-dotenv
 pydantic[email]
 pydantic
+sendgrid
