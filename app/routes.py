@@ -12,7 +12,8 @@ from app.schemas import (
     UserCreate, UserOut, Token, SubscriptionPlanCreate, SubscriptionPlanOut,
     UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
     PlanChangeResponse, ProductSelectionBulkCreate, ProductSelectionBulkResponse,
-    ProductSelectionOut, DetailedSubscriptionResponse, ProductCreate, ProductOut
+    ProductSelectionOut, DetailedSubscriptionResponse, ProductCreate, ProductOut,
+    CreateOrderRequest, CreateOrderResponse
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
@@ -26,6 +27,8 @@ from app.utils.email_utils import send_email
 import pandas as pd
 from fastapi.responses import StreamingResponse
 import io
+from app.services.razorpay_service import razorpay_service
+from app.config.razorpay import razorpay_settings
 
 # User router
 user_router = APIRouter()
@@ -200,7 +203,7 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
     if not current_user.has_used_trial:
         # Find the trial plan
         trial_plan = db.query(SubscriptionPlan).filter(
-            SubscriptionPlan.name == "30-Day Free Trial"
+            SubscriptionPlan.name == "Trial Plan"
         ).first()
         
         if not trial_plan:
@@ -373,6 +376,40 @@ def get_user_subscriptions(current_user: User = Depends(get_current_user), db: S
     
     return detailed_subscriptions
 
+@subscription_router.post("/create-order", response_model=CreateOrderResponse)
+def create_payment_order(
+    order_request: CreateOrderRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    # Verify that the subscription exists and belongs to the user
+    subscription = db.query(UserSubscription).filter(
+        and_(
+            UserSubscription.id == order_request.subscription_id,
+            UserSubscription.user_id == current_user.id
+        )
+    ).first()
+    
+    if not subscription:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found or does not belong to the user"
+        )
+    
+    # Create Razorpay order
+    order = razorpay_service.create_order(
+        amount=order_request.amount,
+        currency=order_request.currency,
+        receipt=f"sub_{subscription.id}"
+    )
+    
+    return CreateOrderResponse(
+        order_id=order["id"],
+        amount=order_request.amount,
+        currency=order_request.currency,
+        key_id=razorpay_settings.RAZORPAY_KEY_ID
+    )
+
 @subscription_router.post("/payments", response_model=PaymentOut)
 def create_payment(payment: PaymentCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Verify that the subscription exists and belongs to the user
@@ -389,20 +426,36 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
             detail="Subscription not found or does not belong to the user"
         )
     
-    # In a real app, verify the payment with Razorpay
+    # Verify the payment signature
+    if not razorpay_service.verify_payment(
+        payment_id=payment.razorpay_payment_id,
+        order_id=payment.razorpay_order_id,
+        signature=payment.razorpay_signature
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid payment signature"
+        )
+    
+    # Get payment details from Razorpay
+    payment_details = razorpay_service.get_payment_details(payment.razorpay_payment_id)
+    
+    # Create payment record
     new_payment = Payment(
         id=str(uuid4()),
         user_id=current_user.id,
         subscription_id=payment.subscription_id,
         razorpay_payment_id=payment.razorpay_payment_id,
+        razorpay_order_id=payment.razorpay_order_id,
+        razorpay_signature=payment.razorpay_signature,
         amount=payment.amount,
-        status=payment.status,
-        paid_at=payment.paid_at
+        status=payment_details["status"],
+        paid_at=datetime.fromtimestamp(payment_details["created_at"])
     )
     db.add(new_payment)
     
     # Activate subscription only if payment is successful
-    if payment.status.lower() == "completed":
+    if payment_details["status"] == "captured":
         subscription.is_active = True
         # Update start_date to current time if it's a new subscription
         if subscription.start_date > datetime.utcnow():

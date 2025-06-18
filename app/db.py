@@ -2,24 +2,26 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import urllib.parse
+import os
+from dotenv import load_dotenv
 
-# Azure SQL connection string components
-server = 'saasfin-server.database.windows.net'
-database = 'saasfin'
-username = 'saasfin'
-password = 'P@ranav17'
-driver = '{ODBC Driver 18 for SQL Server}'  # Make sure this driver is installed
+load_dotenv()
 
-# Create the connection string
+server = os.getenv('AZURE_SQL_SERVER')
+database = os.getenv('AZURE_SQL_DATABASE')
+username = os.getenv('AZURE_SQL_USERNAME')
+password = os.getenv('AZURE_SQL_PASSWORD')
+driver = '{ODBC Driver 18 for SQL Server}'
+
 params = urllib.parse.quote_plus(
-    f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password}'
+    f'DRIVER={driver};SERVER={server};DATABASE={database};UID={username};PWD={password};Connection Timeout=30;Encrypt=yes;TrustServerCertificate=no'
 )
-SQLALCHEMY_DATABASE_URL = f"mssql+pyodbc:///?odbc_connect={params}"
+SQLALCHEMY_DATABASE_URL = os.getenv('SQLALCHEMY_DATABASE_URL') or f"mssql+pyodbc:///?odbc_connect={params}"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
-    pool_pre_ping=True,  # Enable connection health checks
-    pool_recycle=3600    # Recycle connections after 1 hour
+    pool_pre_ping=True,
+    pool_recycle=3600
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base() 

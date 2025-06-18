@@ -72,6 +72,8 @@ class UserSubscriptionOut(UserSubscriptionBase):
 class PaymentBase(BaseModel):
     subscription_id: str
     razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
     amount: float
     status: str
     paid_at: datetime
@@ -86,6 +88,17 @@ class PaymentOut(PaymentBase):
 
     class Config:
         from_attributes = True
+
+class CreateOrderRequest(BaseModel):
+    subscription_id: str
+    amount: float
+    currency: str = "INR"
+
+class CreateOrderResponse(BaseModel):
+    order_id: str
+    amount: float
+    currency: str
+    key_id: str
 
 class PlanChangeResponse(BaseModel):
     subscription: UserSubscriptionOut
