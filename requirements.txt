@@ -11,3 +11,5 @@ pandas
 openpyxl
 pyodbc
 python-dotenv
+pydantic[email]
+pydantic
