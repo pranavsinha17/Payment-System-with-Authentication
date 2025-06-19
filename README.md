@@ -107,6 +107,33 @@ Once the server is running, you can access:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
+## API Response Format
+
+All API endpoints return responses in a consistent, industry-standard format:
+
+### Success Response
+```
+{
+  "success": true,
+  "data": ... // resource, list, or message
+}
+```
+- For list endpoints, `data` is an array.
+- For actions/messages, `data` contains a `message` field.
+- For resource creation or retrieval, `data` contains the resource or list.
+
+### Error Response
+```
+{
+  "success": false,
+  "error": {
+    "type": "ExceptionType",
+    "message": "Error message",
+    "code": 400
+  }
+}
+```
+
 ## API Endpoints
 
 ### Authentication
@@ -126,9 +153,12 @@ Content-Type: application/json
 #### Login
 ```http
 POST /users/login
-Content-Type: application/x-www-form-urlencoded
+Content-Type: application/json
 
-username=user@example.com&password=yourpassword
+{
+    "email": "user@example.com",
+    "password": "yourpassword"
+}
 ```
 
 ### Subscription Management
@@ -288,14 +318,9 @@ Authorization: Bearer <token>
 
 ## Error Handling
 
-The API uses standard HTTP status codes:
-- 200: Success
-- 201: Created
-- 400: Bad Request
-- 401: Unauthorized
-- 403: Forbidden
-- 404: Not Found
-- 500: Internal Server Error
+- All errors are returned in a consistent format as shown above.
+- Standard HTTP status codes are used (400, 401, 403, 404, 409, 422, 500, etc.).
+- Error responses include an error type, message, and code for easy client-side handling.
 
 ## Contributing
 
