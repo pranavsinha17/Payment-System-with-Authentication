@@ -177,4 +177,8 @@ class DetailedSubscriptionResponse(BaseModel):
     number_of_products: int
 
     class Config:
-        from_attributes = True 
+        from_attributes = True
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str 

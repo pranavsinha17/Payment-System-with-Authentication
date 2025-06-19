@@ -13,7 +13,7 @@ from app.schemas import (
     UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
     PlanChangeResponse, ProductSelectionBulkCreate, ProductSelectionBulkResponse,
     ProductSelectionOut, DetailedSubscriptionResponse, ProductCreate, ProductOut,
-    CreateOrderRequest, CreateOrderResponse
+    CreateOrderRequest, CreateOrderResponse, LoginRequest
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
@@ -29,6 +29,7 @@ from fastapi.responses import StreamingResponse
 import io
 from app.services.razorpay_service import razorpay_service
 from app.config.razorpay import razorpay_settings
+from app.exceptions import BadRequestException, NotFoundException, UnauthorizedException, ForbiddenException, ConflictException, UnprocessableEntityException
 
 # User router
 user_router = APIRouter()
@@ -45,12 +46,12 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     # Check for duplicate email
     db_user = db.query(User).filter(User.email == user.email).first()
     if db_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise BadRequestException("Email already registered")
     
     # Check for duplicate phone
     db_user_phone = db.query(User).filter(User.phone == user.phone).first()
     if db_user_phone:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
+        raise BadRequestException("Phone number already registered")
     
     hashed_password = get_password_hash(user.password)
     new_user = User(
@@ -67,10 +68,10 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return new_user
 
 @user_router.post("/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db), response: Response = None):
-    user = db.query(User).filter(User.email == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.password_hash):
-        raise HTTPException(status_code=400, detail="Incorrect email or password")
+def login(request: LoginRequest, db: Session = Depends(get_db), response: Response = None):
+    user = db.query(User).filter(User.email == request.email).first()
+    if not user or not verify_password(request.password, user.password_hash):
+        raise BadRequestException("Incorrect email or password")
     access_token = create_access_token(data={
         "sub": user.id,
         "last_password_change": str(user.last_password_change) if user.last_password_change else ""
@@ -79,7 +80,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         key="access_token",
         value=f"Bearer {access_token}",
         httponly=True,
-        samesite="lax",  # or "none" if using cross-site cookies with HTTPS
+        samesite="none",  # or "none" if using cross-site cookies with HTTPS
         secure=True      # set to True in production with HTTPS
     )
     return {"access_token": access_token, "token_type": "bearer"}
@@ -111,7 +112,7 @@ class ResetPasswordRequest(BaseModel):
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == request.email).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User with this email does not exist.")
+        raise NotFoundException("User with this email does not exist.")
     # Generate a secure token and expiry (1 hour)
     token = secrets.token_urlsafe(32)
     expiry = datetime.utcnow() + timedelta(hours=1)
@@ -132,7 +133,7 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.password_reset_token == request.token).first()
     if not user or not user.password_reset_token_expiry or user.password_reset_token_expiry < datetime.utcnow():
-        raise HTTPException(status_code=400, detail="Invalid or expired token.")
+        raise BadRequestException("Invalid or expired token.")
     user.password_hash = get_password_hash(request.new_password)
     user.password_reset_token = None
     user.password_reset_token_expiry = None
@@ -194,9 +195,8 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
     ).first()
     
     if existing_subscription:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You already have an active subscription. Please wait until it expires or cancel it first."
+        raise BadRequestException(
+            "You already have an active subscription. Please wait until it expires or cancel it first."
         )
     
     # Check if this is a first-time user who hasn't used their trial
@@ -207,9 +207,8 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
         ).first()
         
         if not trial_plan:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Trial plan not found. Please contact support."
+            raise NotFoundException(
+                "Trial plan not found. Please contact support."
             )
         
         # Create a trial subscription
@@ -256,9 +255,8 @@ def get_active_subscription(current_user: User = Depends(get_current_user), db: 
     ).first()
     
     if not subscription:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active subscription found"
+        raise NotFoundException(
+            "No active subscription found"
         )
     
     # Get the subscription plan
@@ -391,9 +389,8 @@ def create_payment_order(
     ).first()
     
     if not subscription:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found or does not belong to the user"
+        raise NotFoundException(
+            "Subscription not found or does not belong to the user"
         )
     
     # Create Razorpay order
@@ -421,9 +418,8 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
     ).first()
     
     if not subscription:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found or does not belong to the user"
+        raise NotFoundException(
+            "Subscription not found or does not belong to the user"
         )
     
     # Verify the payment signature
@@ -432,9 +428,8 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
         order_id=payment.razorpay_order_id,
         signature=payment.razorpay_signature
     ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid payment signature"
+        raise BadRequestException(
+            "Invalid payment signature"
         )
     
     # Get payment details from Razorpay
@@ -494,9 +489,8 @@ def change_subscription_plan(
     
     if not current_subscription:
         print(f"No subscription found with ID: {subscription_id} for user: {current_user.id}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found or does not belong to the user"
+        raise NotFoundException(
+            "Subscription not found or does not belong to the user"
         )
     
     print(f"Found subscription: {current_subscription.id}")
@@ -506,9 +500,8 @@ def change_subscription_plan(
     new_plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == new_plan_id).first()
     if not new_plan:
         print(f"No plan found with ID: {new_plan_id}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="New plan not found"
+        raise NotFoundException(
+            "New plan not found"
         )
     
     print(f"Found new plan: {new_plan.id}")
@@ -582,20 +575,19 @@ def create_product_selections(
     ).first()
     
     if not subscription:
-        raise HTTPException(status_code=404, detail="Subscription not found")
+        raise NotFoundException("Subscription not found")
     
     # Get the subscription plan
     plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == subscription.plan_id).first()
     if not plan:
-        raise HTTPException(status_code=404, detail="Subscription plan not found")
+        raise NotFoundException("Subscription plan not found")
     
     # Verify all product IDs exist in the plan's product_ids
     plan_product_ids = json.loads(plan.product_ids) if isinstance(plan.product_ids, str) else plan.product_ids
     invalid_products = [pid for pid in bulk_selection.product_ids if pid not in plan_product_ids]
     if invalid_products:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Products {invalid_products} are not available in this plan"
+        raise BadRequestException(
+            f"Products {invalid_products} are not available in this plan"
         )
     
     # Deactivate any existing product selections for this subscription
@@ -646,9 +638,8 @@ def get_product_selections(
     ).first()
     
     if not subscription:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Subscription not found or does not belong to the user"
+        raise NotFoundException(
+            "Subscription not found or does not belong to the user"
         )
     
     # Get all product selections for this subscription
@@ -673,9 +664,8 @@ def delete_product_selection(
     ).first()
     
     if not selection:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product selection not found or does not belong to the user"
+        raise NotFoundException(
+            "Product selection not found or does not belong to the user"
         )
     
     # Soft delete by setting is_active to False
@@ -719,7 +709,7 @@ def process_product1_file(
         )
     ).first()
     if not subscription:
-        raise HTTPException(status_code=403, detail="Your subscription has expired. Please subscribe to continue.")
+        raise ForbiddenException("Your subscription has expired. Please subscribe to continue.")
 
     # Read the uploaded file into a DataFrame
     if file.filename.endswith('.csv'):
@@ -727,7 +717,7 @@ def process_product1_file(
     elif file.filename.endswith('.xls') or file.filename.endswith('.xlsx'):
         df = pd.read_excel(file.file)
     else:
-        raise HTTPException(status_code=400, detail="Only CSV and Excel files are supported.")
+        raise BadRequestException("Only CSV and Excel files are supported.")
 
     # --- Tweak the DataFrame here (example: add a column) ---
     df['tweaked'] = 'example tweak'  # Replace with your actual logic
