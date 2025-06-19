@@ -59,6 +59,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         id=str(uuid4()),
         email=user.email,
         phone=user.phone,
+        fullname=user.fullname,
         password_hash=hashed_password,
         is_active=True,
         registered_at=datetime.utcnow()

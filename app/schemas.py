@@ -6,6 +6,7 @@ from pydantic import validator
 class UserBase(BaseModel):
     email: EmailStr
     phone: str
+    fullname: str
 
 class UserCreate(UserBase):
     password: str

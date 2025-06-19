@@ -146,6 +146,7 @@ Content-Type: application/json
 {
     "email": "user@example.com",
     "phone": "1234567890",
+    "fullname": "John Doe",
     "password": "yourpassword"
 }
 ```
