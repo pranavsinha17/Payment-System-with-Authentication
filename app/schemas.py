@@ -16,6 +16,7 @@ class UserOut(UserBase):
     is_active: bool
     registered_at: datetime
     has_used_trial: bool
+    fullname: str
 
     class Config:
         from_attributes = True
