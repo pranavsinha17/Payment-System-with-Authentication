@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Any
 from datetime import datetime
 from pydantic import validator
 
@@ -181,4 +181,16 @@ class DetailedSubscriptionResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str 
+    password: str
+
+class SuccessResponse(BaseModel):
+    success: bool = True
+    data: Any
+
+class SuccessListResponse(BaseModel):
+    success: bool = True
+    data: List[Any]
+
+class MessageResponse(BaseModel):
+    success: bool = True
+    data: dict 

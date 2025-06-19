@@ -13,7 +13,8 @@ from app.schemas import (
     UserSubscriptionCreate, UserSubscriptionOut, PaymentCreate, PaymentOut,
     PlanChangeResponse, ProductSelectionBulkCreate, ProductSelectionBulkResponse,
     ProductSelectionOut, DetailedSubscriptionResponse, ProductCreate, ProductOut,
-    CreateOrderRequest, CreateOrderResponse, LoginRequest
+    CreateOrderRequest, CreateOrderResponse, LoginRequest,
+    SuccessResponse, SuccessListResponse, MessageResponse
 )
 from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
@@ -41,7 +42,7 @@ def get_db():
     finally:
         db.close()
 
-@user_router.post("/register", response_model=UserOut)
+@user_router.post("/register", response_model=SuccessResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     # Check for duplicate email
     db_user = db.query(User).filter(User.email == user.email).first()
@@ -65,9 +66,9 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return {"success": True, "data": UserOut.from_orm(new_user)}
 
-@user_router.post("/login", response_model=Token)
+@user_router.post("/login", response_model=SuccessResponse)
 def login(request: LoginRequest, db: Session = Depends(get_db), response: Response = None):
     user = db.query(User).filter(User.email == request.email).first()
     if not user or not verify_password(request.password, user.password_hash):
@@ -83,23 +84,23 @@ def login(request: LoginRequest, db: Session = Depends(get_db), response: Respon
         samesite="none",  # or "none" if using cross-site cookies with HTTPS
         secure=True      # set to True in production with HTTPS
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"success": True, "data": {"access_token": access_token, "token_type": "bearer"}}
 
-@user_router.get("/me", response_model=UserOut)
+@user_router.get("/me", response_model=SuccessResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return {"success": True, "data": UserOut.from_orm(current_user)}
 
-@user_router.get("/users", response_model=list[UserOut])
+@user_router.get("/users", response_model=SuccessListResponse)
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    # In a real app, check if current_user is admin
-    return db.query(User).all()
+    users = db.query(User).all()
+    return {"success": True, "data": [UserOut.from_orm(u) for u in users]}
 
-@user_router.put("/me/phone", response_model=UserOut)
+@user_router.put("/me/phone", response_model=SuccessResponse)
 def update_phone(new_phone: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     current_user.phone = new_phone
     db.commit()
     db.refresh(current_user)
-    return current_user
+    return {"success": True, "data": UserOut.from_orm(current_user)}
 
 class ForgotPasswordRequest(BaseModel):
     email: str
@@ -108,7 +109,7 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str
 
-@user_router.post("/forgot-password")
+@user_router.post("/forgot-password", response_model=MessageResponse)
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == request.email).first()
     if not user:
@@ -127,9 +128,9 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
         body=email_body,
         to_email=user.email
     )
-    return {"message": "If this email exists, a password reset link has been sent."}
+    return {"success": True, "data": {"message": "If this email exists, a password reset link has been sent."}}
 
-@user_router.post("/reset-password")
+@user_router.post("/reset-password", response_model=MessageResponse)
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.password_reset_token == request.token).first()
     if not user or not user.password_reset_token_expiry or user.password_reset_token_expiry < datetime.utcnow():
@@ -139,12 +140,12 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     user.password_reset_token_expiry = None
     user.last_password_change = datetime.utcnow()
     db.commit()
-    return {"message": "Password has been reset successfully."}
+    return {"success": True, "data": {"message": "Password has been reset successfully."}}
 
 # Subscription router
 subscription_router = APIRouter()
 
-@subscription_router.post("/subscription-plans", response_model=SubscriptionPlanOut)
+@subscription_router.post("/subscription-plans", response_model=SuccessResponse)
 def create_subscription_plan(
     plan: SubscriptionPlanCreate,
     current_user: User = Depends(get_current_user),
@@ -160,9 +161,9 @@ def create_subscription_plan(
     db.add(new_plan)
     db.commit()
     db.refresh(new_plan)
-    return new_plan
+    return {"success": True, "data": SubscriptionPlanOut.from_orm(new_plan)}
 
-@subscription_router.post("/trial-plan", response_model=SubscriptionPlanOut)
+@subscription_router.post("/trial-plan", response_model=SuccessResponse)
 def create_trial_plan(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -181,9 +182,9 @@ def create_trial_plan(
     db.add(trial_plan)
     db.commit()
     db.refresh(trial_plan)
-    return trial_plan
+    return {"success": True, "data": SubscriptionPlanOut.from_orm(trial_plan)}
 
-@subscription_router.post("/user-subscriptions", response_model=UserSubscriptionOut)
+@subscription_router.post("/user-subscriptions", response_model=SuccessResponse)
 def create_user_subscription(subscription: UserSubscriptionCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Check if user already has an active subscription
     existing_subscription = db.query(UserSubscription).filter(
@@ -227,7 +228,7 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
         db.add(new_subscription)
         db.commit()
         db.refresh(new_subscription)
-        return new_subscription
+        return {"success": True, "data": UserSubscriptionOut.from_orm(new_subscription)}
     else:
         # Regular subscription creation
         new_subscription = UserSubscription(
@@ -241,9 +242,9 @@ def create_user_subscription(subscription: UserSubscriptionCreate, current_user:
         db.add(new_subscription)
         db.commit()
         db.refresh(new_subscription)
-        return new_subscription
+        return {"success": True, "data": UserSubscriptionOut.from_orm(new_subscription)}
 
-@subscription_router.get("/me/active-subscription", response_model=DetailedSubscriptionResponse)
+@subscription_router.get("/me/active-subscription", response_model=SuccessResponse)
 def get_active_subscription(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Get the user's active subscription
     subscription = db.query(UserSubscription).filter(
@@ -309,9 +310,10 @@ def get_active_subscription(current_user: User = Depends(get_current_user), db: 
         "number_of_products": len(product_selections)
     }
     
-    return response
+    response["plan"] = SubscriptionPlanOut.from_orm(response["plan"]) if response.get("plan") else None
+    return {"success": True, "data": response}
 
-@subscription_router.get("/me/subscriptions", response_model=list[DetailedSubscriptionResponse])
+@subscription_router.get("/me/subscriptions", response_model=SuccessListResponse)
 def get_user_subscriptions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Get all subscriptions for the user
     subscriptions = db.query(UserSubscription).filter(
@@ -372,9 +374,11 @@ def get_user_subscriptions(current_user: User = Depends(get_current_user), db: S
         }
         detailed_subscriptions.append(detailed_subscription)
     
-    return detailed_subscriptions
+    for ds in detailed_subscriptions:
+        ds["plan"] = SubscriptionPlanOut.from_orm(ds["plan"]) if ds.get("plan") else None
+    return {"success": True, "data": detailed_subscriptions}
 
-@subscription_router.post("/create-order", response_model=CreateOrderResponse)
+@subscription_router.post("/create-order", response_model=SuccessResponse)
 def create_payment_order(
     order_request: CreateOrderRequest,
     current_user: User = Depends(get_current_user),
@@ -400,14 +404,14 @@ def create_payment_order(
         receipt=f"sub_{subscription.id}"
     )
     
-    return CreateOrderResponse(
+    return {"success": True, "data": CreateOrderResponse(
         order_id=order["id"],
         amount=order_request.amount,
         currency=order_request.currency,
         key_id=razorpay_settings.RAZORPAY_KEY_ID
-    )
+    )}
 
-@subscription_router.post("/payments", response_model=PaymentOut)
+@subscription_router.post("/payments", response_model=SuccessResponse)
 def create_payment(payment: PaymentCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     # Verify that the subscription exists and belongs to the user
     subscription = db.query(UserSubscription).filter(
@@ -466,9 +470,9 @@ def create_payment(payment: PaymentCreate, current_user: User = Depends(get_curr
     
     db.commit()
     db.refresh(new_payment)
-    return new_payment
+    return {"success": True, "data": PaymentOut.from_orm(new_payment)}
 
-@subscription_router.post("/{subscription_id}/change-plan", response_model=PlanChangeResponse)
+@subscription_router.post("/{subscription_id}/change-plan", response_model=SuccessResponse)
 def change_subscription_plan(
     subscription_id: str,
     new_plan_id: str,
@@ -546,21 +550,22 @@ def change_subscription_plan(
     
     print(f"Created new subscription: {new_subscription.id}")
     
-    return PlanChangeResponse(
-        subscription=new_subscription,
+    return {"success": True, "data": PlanChangeResponse(
+        subscription=UserSubscriptionOut.from_orm(new_subscription),
         price_difference=price_difference,
         remaining_days=remaining_days
-    )
+    )}
 
-@subscription_router.get("/subscription-plans", response_model=list[SubscriptionPlanOut])
+@subscription_router.get("/subscription-plans", response_model=SuccessListResponse)
 def list_subscription_plans(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get all available subscription plans"""
-    return db.query(SubscriptionPlan).all()
+    plans = db.query(SubscriptionPlan).all()
+    return {"success": True, "data": [SubscriptionPlanOut.from_orm(p) for p in plans]}
 
-@subscription_router.post("/product-selections", response_model=ProductSelectionBulkResponse)
+@subscription_router.post("/product-selections", response_model=SuccessResponse)
 def create_product_selections(
     bulk_selection: ProductSelectionBulkCreate,
     current_user: User = Depends(get_current_user),
@@ -616,14 +621,14 @@ def create_product_selections(
     # Calculate total price based on number of products
     total_price = plan.price * len(bulk_selection.product_ids)
     
-    return {
-        "selections": selections,
+    return {"success": True, "data": {
+        "selections": [ProductSelectionOut.from_orm(s) for s in selections],
         "total_price": total_price,
         "duration": plan.duration,
         "number_of_products": len(bulk_selection.product_ids)
-    }
+    }}
 
-@subscription_router.get("/subscriptions/{subscription_id}/product-selections", response_model=List[ProductSelectionOut])
+@subscription_router.get("/subscriptions/{subscription_id}/product-selections", response_model=SuccessListResponse)
 def get_product_selections(
     subscription_id: str,
     current_user: User = Depends(get_current_user),
@@ -647,9 +652,9 @@ def get_product_selections(
         ProductSelection.subscription_id == subscription_id
     ).all()
     
-    return selections
+    return {"success": True, "data": [ProductSelectionOut.from_orm(s) for s in selections]}
 
-@subscription_router.delete("/product-selections/{selection_id}")
+@subscription_router.delete("/product-selections/{selection_id}", response_model=MessageResponse)
 def delete_product_selection(
     selection_id: str,
     current_user: User = Depends(get_current_user),
@@ -672,9 +677,9 @@ def delete_product_selection(
     selection.is_active = False
     db.commit()
     
-    return {"message": "Product selection deactivated successfully"}
+    return {"success": True, "data": {"message": "Product selection deactivated successfully"}}
 
-@subscription_router.post("/products", response_model=ProductOut)
+@subscription_router.post("/products", response_model=SuccessResponse)
 def create_product(
     product: ProductCreate,
     current_user: User = Depends(get_current_user),
@@ -692,7 +697,7 @@ def create_product(
     db.add(new_product)
     db.commit()
     db.refresh(new_product)
-    return new_product
+    return {"success": True, "data": ProductOut.from_orm(new_product)}
 
 @subscription_router.post("/product1/process-file")
 def process_product1_file(
