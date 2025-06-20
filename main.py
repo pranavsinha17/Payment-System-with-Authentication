@@ -15,7 +15,7 @@ def on_startup():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # your frontend URL
+    allow_origins=["https://yesbee4.vercel.app/"],  # your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
