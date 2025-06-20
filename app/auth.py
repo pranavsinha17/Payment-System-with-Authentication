@@ -7,10 +7,9 @@ from fastapi.security import OAuth2PasswordBearer
 from app.models.user import User
 from app.db import SessionLocal
 import logging
+from app.middleware.auth_middleware import AuthenticationMiddleware
 
-SECRET_KEY = "your_secret_key"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
+from app.config.settings import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -53,34 +52,13 @@ def get_current_user(request: Request):
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    # Fetch token only from cookie
-    raw_token = request.cookies.get("access_token")
-    if raw_token and raw_token.startswith("Bearer "):
-        raw_token = raw_token.split(" ", 1)[1]
-    if not raw_token:
+    print("get_current_user called")
+    print(request.state)
+    user_info = getattr(request.state, "user_info", None)
+    if not user_info:
         raise credentials_exception
-    try:
-        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        token_last_password_change = payload.get("last_password_change")
-        token_role = payload.get("role")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    db = SessionLocal()
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise credentials_exception
-    # Check last_password_change
-    if token_last_password_change != str(user.last_password_change):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token is no longer valid. Please log in again."
-        )
-    # Attach role from token to user object for downstream use
-    user.role = token_role or user.role
-    return user
+    # Optionally, you can return a User Pydantic model or a dict
+    return user_info
 
 def require_role(required_role: str):
     def role_checker(current_user: User = Depends(get_current_user)):

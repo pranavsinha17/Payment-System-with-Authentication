@@ -6,8 +6,10 @@ import app.models  # Ensure models are imported
 from app.routes import user_router, subscription_router
 import logging
 from app.exceptions import APIException
+from app.middleware.auth_middleware import AuthenticationMiddleware
 
 app = FastAPI()
+app.add_middleware(AuthenticationMiddleware)
 
 @app.on_event("startup")
 def on_startup():
