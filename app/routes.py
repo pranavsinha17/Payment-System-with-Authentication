@@ -80,7 +80,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db), response: Respon
     })
     response.set_cookie(
         key="access_token",
-        value=f"Bearer {access_token}",
+        value=f"{access_token}",
         httponly=True,
         samesite="none",  # or "none" if using cross-site cookies with HTTPS
         secure=True      # set to True in production with HTTPS
