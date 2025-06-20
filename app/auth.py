@@ -6,12 +6,16 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from app.models.user import User
 from app.db import SessionLocal
+import logging
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+logger = logging.getLogger("auth")
+logging.basicConfig(level=logging.INFO)  # You can adjust the level as needed
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -43,26 +47,20 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
-
-def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
+def get_current_user(request: Request):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    # Try to get token from cookie if not present in header
-    if not token:
-        token = request.cookies.get("access_token")
-        if token and token.startswith("Bearer "):
-            token = token.split(" ", 1)[1]
-    else:
-        if token.startswith("Bearer "):
-            token = token.split(" ", 1)[1]
-    if not token:
+    # Fetch token only from cookie
+    raw_token = request.cookies.get("access_token")
+    if raw_token and raw_token.startswith("Bearer "):
+        raw_token = raw_token.split(" ", 1)[1]
+    if not raw_token:
         raise credentials_exception
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(raw_token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         token_last_password_change = payload.get("last_password_change")
         token_role = payload.get("role")
@@ -82,7 +80,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
         )
     # Attach role from token to user object for downstream use
     user.role = token_role or user.role
-    return user 
+    return user
 
 def require_role(required_role: str):
     def role_checker(current_user: User = Depends(get_current_user)):

@@ -89,6 +89,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db), response: Respon
 
 @user_router.get("/me", response_model=SuccessResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
+    print(current_user)
     return {"success": True, "data": UserOut.from_orm(current_user)}
 
 @user_router.get("/admin/users", response_model=SuccessListResponse, dependencies=[Depends(require_role("admin"))])
