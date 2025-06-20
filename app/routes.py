@@ -16,7 +16,7 @@ from app.schemas import (
     CreateOrderRequest, CreateOrderResponse, LoginRequest,
     SuccessResponse, SuccessListResponse, MessageResponse
 )
-from app.auth import get_password_hash, verify_password, create_access_token, get_current_user
+from app.auth import get_password_hash, verify_password, create_access_token, get_current_user, require_role
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime, timedelta
 from sqlalchemy import and_
@@ -80,7 +80,7 @@ def login(request: LoginRequest, db: Session = Depends(get_db), response: Respon
     })
     response.set_cookie(
         key="access_token",
-        value=f"{access_token}",
+        value=f"Bearer {access_token}",
         httponly=True,
         samesite="none",  # or "none" if using cross-site cookies with HTTPS
         secure=True      # set to True in production with HTTPS
@@ -90,6 +90,11 @@ def login(request: LoginRequest, db: Session = Depends(get_db), response: Respon
 @user_router.get("/me", response_model=SuccessResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
     return {"success": True, "data": UserOut.from_orm(current_user)}
+
+@user_router.get("/admin/users", response_model=SuccessListResponse, dependencies=[Depends(require_role("admin"))])
+def admin_list_users(db: Session = Depends(get_db)):
+    users = db.query(User).all()
+    return {"success": True, "data": [UserOut.from_orm(u) for u in users]}
 
 @user_router.get("/users", response_model=SuccessListResponse)
 def list_users(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -142,6 +147,11 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     user.last_password_change = datetime.utcnow()
     db.commit()
     return {"success": True, "data": {"message": "Password has been reset successfully."}}
+
+@user_router.post("/logout", response_model=MessageResponse)
+def logout(response: Response):
+    response.delete_cookie("access_token")
+    return {"success": True, "data": {"message": "Logged out successfully."}}
 
 # Subscription router
 subscription_router = APIRouter()

@@ -21,6 +21,24 @@ def get_password_hash(password):
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
+    # If a User object is provided, include more user details in the claims
+    user = to_encode.get('user')
+    if user:
+        to_encode['sub'] = user.id
+        to_encode['email'] = user.email
+        to_encode['phone'] = user.phone
+        to_encode['fullname'] = user.fullname
+        to_encode['is_active'] = user.is_active
+        to_encode['registered_at'] = str(user.registered_at) if user.registered_at else None
+        to_encode['has_used_trial'] = user.has_used_trial
+        to_encode['role'] = user.role
+        to_encode['last_password_change'] = str(user.last_password_change) if user.last_password_change else None
+    else:
+        # Ensure 'role' and 'last_password_change' are included if not using a User object
+        if 'role' not in to_encode:
+            to_encode['role'] = 'user'
+        if 'last_password_change' not in to_encode:
+            to_encode['last_password_change'] = ''
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -47,6 +65,7 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         token_last_password_change = payload.get("last_password_change")
+        token_role = payload.get("role")
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -61,4 +80,13 @@ def get_current_user(request: Request, token: str = Depends(oauth2_scheme)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token is no longer valid. Please log in again."
         )
+    # Attach role from token to user object for downstream use
+    user.role = token_role or user.role
     return user 
+
+def require_role(required_role: str):
+    def role_checker(current_user: User = Depends(get_current_user)):
+        if current_user.role != required_role:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return current_user
+    return role_checker 

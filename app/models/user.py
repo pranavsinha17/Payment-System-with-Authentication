@@ -16,6 +16,7 @@ class User(Base):
     password_reset_token = Column(String(255), nullable=True)
     password_reset_token_expiry = Column(DateTime, nullable=True)
     last_password_change = Column(DateTime, default=datetime.utcnow)
+    role = Column(String(50), default="user")  # Add this line for RBAC
 
     # Relationships
     subscriptions = relationship("UserSubscription", back_populates="user")
